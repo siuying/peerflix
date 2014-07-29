@@ -5,6 +5,7 @@ var rangeParser = require('range-parser');
 var url = require('url');
 var mime = require('mime');
 var pump = require('pump');
+var ffmpeg = require('fluent-ffmpeg');
 
 var parseBlocklist = function(filename) {
 	// TODO: support gzipped files
@@ -22,7 +23,7 @@ var parseBlocklist = function(filename) {
 	return blocklist;
 };
 
-var createServer = function(e, index) {
+var createServer = function(e, index, transcodingEnabled) {
 	var server = http.createServer();
 
 	var onready = function() {
@@ -39,6 +40,24 @@ var createServer = function(e, index) {
 
 	if (e.torrent) onready();
 	else e.on('ready', onready);
+
+	var transcoder = function(input, output) {
+		var command = ffmpeg(input);
+		command
+			.videoCodec("libx264")
+			.videoBitrate(2000)
+			.audioCodec("aac")
+			.audioBitrate('128k')
+			.addOption('-frag_duration', '3000')
+			.format("mp4")
+			.on('error', function(err) {
+				console.log('transcoding error:', err.message);
+			})
+			.pipe(output, {end:true});
+		output.on("close", function(){
+			command.kill();
+		});
+	};
 
 	var toJSON = function(host) {
 		var list = [];
@@ -71,6 +90,14 @@ var createServer = function(e, index) {
 		}
 
 		var file = e.files[i];
+
+		// if transcoding enabled, always return mp4 video
+		if (transcodingEnabled) {
+			response.setHeader('Content-Type', 'video/mp4');
+			transcoder(file.createReadStream(), response);
+			return;
+		}
+
 		var range = request.headers.range;
 		range = range && rangeParser(file.length, range)[0];
 		response.setHeader('Accept-Ranges', 'bytes');
@@ -90,7 +117,7 @@ var createServer = function(e, index) {
 		if (request.method === 'HEAD') return response.end();
 		pump(file.createReadStream(range), response);
 	}).on('connection', function(socket) {
-	socket.setTimeout(36000000);
+		socket.setTimeout(36000000);
 	});
 
 	return server;
@@ -111,7 +138,7 @@ module.exports = function(torrent, opts) {
 	engine.on('uninterested', function() { engine.swarm.pause();  });
 	engine.on('interested',   function() { engine.swarm.resume(); });
 
-	engine.server = createServer(engine, opts.index);
+	engine.server = createServer(engine, opts.index, opts.transcoding);
 
 	// Listen when torrent-stream is ready, by default a random port.
 	engine.on('ready', function() { engine.server.listen(opts.port || 0); });
