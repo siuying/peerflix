@@ -138,7 +138,7 @@ module.exports = function(torrent, opts) {
 	engine.on('uninterested', function() { engine.swarm.pause();  });
 	engine.on('interested',   function() { engine.swarm.resume(); });
 
-	engine.server = createServer(engine, opts.index, opts.transcoding);
+	engine.server = createServer(engine, opts.index, true);
 
 	// Listen when torrent-stream is ready, by default a random port.
 	engine.on('ready', function() { engine.server.listen(opts.port || 0); });
